@@ -95,8 +95,8 @@ PlayerSearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     local txt = string.lower(PlayerSearchBar.Text)
     for _, child in ipairs(PlayerScroll:GetChildren()) do
         if child:IsA("Frame") and child.Name ~= "UIListLayout" then
-            local nameLbl = child:FindFirstChild("NameLbl") or child:FindFirstChildOfClass("TextLabel")
-            if nameLbl then
+            local nameLbl = child:FindFirstChild("PlayerNameLabel")
+            if nameLbl and nameLbl:IsA("TextLabel") then
                 child.Visible = (txt == "" or string.find(string.lower(nameLbl.Text), txt))
             end
         end
@@ -826,6 +826,7 @@ local function addPlayerButton(player)
     CountLbl.TextSize = 11
 
     local NameLbl = Instance.new("TextLabel")
+    NameLbl.Name = "PlayerNameLabel"
     NameLbl.Parent = Container
     NameLbl.Size = UDim2.new(1, -60, 0, 16)
     NameLbl.Position = UDim2.new(0, 54, 0, 18)
