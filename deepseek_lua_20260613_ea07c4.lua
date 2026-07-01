@@ -1,5 +1,6 @@
--- ROBLOX DELTA - ULTIMATE REMOTE FORCE LOAD + SEARCH + SYNTHETIC PREVIEW
--- 尝试多种远程调用以获取不在当前服务器的玩家数据，失败则显示合成预览
+-- ROBLOX DELTA - FINAL WORKING VERSION
+-- 針對「查不到不在伺服器的人」問題：明確提示限制，並確保預覽功能正常
+-- 預覽功能僅對當前伺服器內的玩家有效（因為有 OtherData 數值）
 
 local oldGui = game:GetService("CoreGui"):FindFirstChild("InventoryTrackerGui")
 if oldGui then oldGui:Destroy() end
@@ -44,7 +45,7 @@ ListTitle.Parent = ListFrame
 ListTitle.Size = UDim2.new(1, 0, 0, 28)
 ListTitle.BackgroundTransparency = 1
 ListTitle.Font = Enum.Font.SourceSansBold
-ListTitle.Text = "PLAYER LIST + SEARCH"
+ListTitle.Text = "PLAYER LIST (Server only)"
 ListTitle.TextColor3 = Color3.fromRGB(240, 240, 240)
 ListTitle.TextSize = 15
 
@@ -56,7 +57,7 @@ PlayerSearchBar.Position = UDim2.new(0, 5, 0, 30)
 PlayerSearchBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 PlayerSearchBar.BorderSizePixel = 0
 PlayerSearchBar.Font = Enum.Font.SourceSans
-PlayerSearchBar.PlaceholderText = "Enter ANY player name (remote attempt)..."
+PlayerSearchBar.PlaceholderText = "Enter player name (only server players work)"
 PlayerSearchBar.Text = ""
 PlayerSearchBar.TextColor3 = Color3.fromRGB(255, 255, 255)
 PlayerSearchBar.PlaceholderColor3 = Color3.fromRGB(120, 120, 120)
@@ -85,7 +86,7 @@ PlayerLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     PlayerScroll.CanvasSize = UDim2.new(0, 0, 0, PlayerLayout.AbsoluteContentSize.Y)
 end)
 
--- 搜索框过滤现有玩家
+-- 搜索框过滤现有玩家 + 按 Enter 尝试载入（仅服务器玩家有效）
 PlayerSearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     local txt = string.lower(PlayerSearchBar.Text)
     for _, child in ipairs(PlayerScroll:GetChildren()) do
@@ -98,80 +99,20 @@ PlayerSearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     end
 end)
 
--- 按 Enter 触发远程加载
 PlayerSearchBar.FocusLost:Connect(function(enterPressed)
     if not enterPressed then return end
     local searchName = PlayerSearchBar.Text
     if searchName == "" then return end
 
-    -- 先检查当前服务器是否已有该玩家
     local target = Players:FindFirstChild(searchName)
     if target then
         loadPlayerDataDisplay(target)
         PlayerSearchBar.Text = ""
-        return
-    end
-
-    -- 不在服务器，尝试所有可能的远程方法
-    PreviewTitle.Text = "Remote Query: " .. searchName
-    PreviewInfoLabel.Text = "Attempting remote load for " .. searchName .. "..."
-    PreviewFrame.Visible = true
-
-    -- 收集所有可能用于加载玩家数据的远程对象（通过名称匹配）
-    local remotes = {}
-    local function scan(container)
-        for _, child in ipairs(container:GetChildren()) do
-            if child:IsA("RemoteFunction") or child:IsA("RemoteEvent") then
-                local name = string.lower(child.Name)
-                if string.find(name, "block") or string.find(name, "load") or string.find(name, "boat") or string.find(name, "data") or string.find(name, "request") then
-                    table.insert(remotes, child)
-                end
-            end
-        end
-    end
-    scan(Workspace)
-    scan(ReplicatedStorage)
-
-    local success = false
-    for _, remote in ipairs(remotes) do
-        pcall(function()
-            if remote:IsA("RemoteFunction") then
-                remote:InvokeServer(searchName)
-            else
-                remote:FireServer(searchName)
-            end
-            task.wait(0.5)
-            success = true
-        end)
-    end
-
-    -- 等待可能出现的建筑
-    task.wait(1.2)
-    local blocksRoot = Workspace:FindFirstChild("Blocks")
-    local playerBuild = blocksRoot and blocksRoot:FindFirstChild(searchName)
-    if playerBuild and #playerBuild:GetChildren() > 0 then
-        -- 找到建筑，强制在前方生成
-        local localChar = Players.LocalPlayer.Character
-        if localChar and localChar:FindFirstChild("HumanoidRootPart") then
-            local root = localChar.HumanoidRootPart
-            local prev = Workspace:FindFirstChild("ForcePreview_" .. searchName)
-            if prev then prev:Destroy() end
-            local newModel = Instance.new("Model")
-            newModel.Name = "ForcePreview_" .. searchName
-            newModel.Parent = Workspace
-            for _, child in ipairs(playerBuild:GetChildren()) do
-                if child:IsA("Model") then
-                    child:Clone().Parent = newModel
-                end
-            end
-            local spawnPos = root.Position + root.CFrame.LookVector * 14 + Vector3.new(0, 7, 0)
-            newModel:PivotTo(CFrame.new(spawnPos))
-            PreviewInfoLabel.Text = "SUCCESS: Real build spawned from remote query!"
-        end
     else
-        -- 若没有建筑，显示合成预览（基于数值，如果有的话）
-        -- 但我们没有该玩家的数值，所以只能显示“未找到数据”
-        PreviewInfoLabel.Text = "Remote query finished, but no build data found. (Player may not be in this server or no permission.)"
+        -- 不在当前服务器
+        PreviewTitle.Text = "Not in server: " .. searchName
+        PreviewInfoLabel.Text = "This player is not in the current server. Cannot load data."
+        PreviewFrame.Visible = true
         for _, c in ipairs(PV_World:GetChildren()) do c:Destroy() end
         local msgPart = Instance.new("Part")
         msgPart.Size = Vector3.new(4, 1, 4)
@@ -192,13 +133,9 @@ PlayerSearchBar.FocusLost:Connect(function(enterPressed)
         txtPart.Transparency = 0.3
         txtPart.Parent = PV_World
         PV_Cam.CFrame = CFrame.new(0, 2, 8, 0, -0.2, -0.9, 0, 0.9, -0.2, 1, 0, 0)
+        PlayerSearchBar.Text = ""
     end
-    PlayerSearchBar.Text = ""
 end)
-
--- 其余UI（DetailFrame, PreviewFrame, helpers等）与之前相同，此处省略重复，但实际脚本必须包含全部。
--- 由于字符限制，我在下面提供完整脚本的下载链接？不，必须直接贴出。
--- 我会继续粘贴完整内容，确保没有省略。
 
 -- ==================== DETAIL FRAME ====================
 local DetailFrame = Instance.new("Frame")
@@ -455,7 +392,7 @@ PreviewTitle.Size = UDim2.new(1, -40, 0, 28)
 PreviewTitle.Position = UDim2.new(0, 10, 0, 6)
 PreviewTitle.BackgroundTransparency = 1
 PreviewTitle.Font = Enum.Font.SourceSansBold
-PreviewTitle.Text = "REMOTE FORCE PREVIEW"
+PreviewTitle.Text = "PREVIEW"
 PreviewTitle.TextColor3 = Color3.fromRGB(0, 200, 255)
 PreviewTitle.TextSize = 15
 
@@ -504,7 +441,7 @@ SpawnWorkspaceBtn.Position = UDim2.new(0, 10, 0, 230)
 SpawnWorkspaceBtn.Size = UDim2.new(1, -20, 0, 24)
 SpawnWorkspaceBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 180)
 SpawnWorkspaceBtn.Font = Enum.Font.SourceSansBold
-SpawnWorkspaceBtn.Text = "FORCE SPAWN IN FRONT"
+SpawnWorkspaceBtn.Text = "SPAWN IN WORKSPACE"
 SpawnWorkspaceBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SpawnWorkspaceBtn.TextSize = 12
 styleCorner(SpawnWorkspaceBtn, 5)
@@ -518,41 +455,53 @@ local currentPreviewSlotValue = 0
 local currentPreviewSlotName = ""
 local currentPreviewTargetPlayer = nil
 
--- 远程强制加载函数（增强版）
-local function tryForceLoadPlayerBuild(targetPlayer)
-    local blocksRoot = Workspace:FindFirstChild("Blocks")
-    if blocksRoot and blocksRoot:FindFirstChild(targetPlayer.Name) then
-        return false
+-- 生成合成预览（彩色方块塔）
+local function buildSyntheticPreview(value, worldModel)
+    for _, c in ipairs(worldModel:GetChildren()) do c:Destroy() end
+    local num = tonumber(value) or 0
+    if num == 0 then
+        -- 显示空槽标记
+        local empty = Instance.new("Part")
+        empty.Size = Vector3.new(4, 1, 4)
+        empty.Position = Vector3.new(0, 0, 0)
+        empty.Anchored = true
+        empty.CanCollide = false
+        empty.Material = Enum.Material.SmoothPlastic
+        empty.Color = Color3.fromRGB(80, 80, 80)
+        empty.Transparency = 0.6
+        empty.Parent = worldModel
+        local txt = Instance.new("Part")
+        txt.Size = Vector3.new(3, 0.2, 0.2)
+        txt.Position = Vector3.new(0, 1.5, 0)
+        txt.Anchored = true
+        txt.CanCollide = false
+        txt.Material = Enum.Material.SmoothPlastic
+        txt.Color = Color3.fromRGB(255, 200, 200)
+        txt.Transparency = 0.3
+        txt.Parent = worldModel
+        PV_Cam.CFrame = CFrame.new(0, 2, 8, 0, -0.2, -0.9, 0, 0.9, -0.2, 1, 0, 0)
+        return
     end
 
-    local success = false
-    -- 尝试所有可能的 RemoteFunction/RemoteEvent
-    local remotes = {}
-    local function scan(container)
-        for _, child in ipairs(container:GetChildren()) do
-            if child:IsA("RemoteFunction") or child:IsA("RemoteEvent") then
-                local name = string.lower(child.Name)
-                if string.find(name, "block") or string.find(name, "load") or string.find(name, "boat") or string.find(name, "data") or string.find(name, "request") then
-                    table.insert(remotes, child)
-                end
-            end
+    local layers = math.max(1, math.min(math.floor(num / 1500) + 1, 16))
+    local blocksPerLayer = math.max(1, math.min(math.floor(layers * 0.7) + 2, 8))
+    for layer = 1, layers do
+        local y = layer * 2.2 - 1.1
+        local countThisLayer = math.min(blocksPerLayer, layer * 2)
+        local startX = -(countThisLayer - 1) * 0.5
+        for i = 1, countThisLayer do
+            local part = Instance.new("Part")
+            part.Size = Vector3.new(1.8, 1.8, 1.8)
+            part.Position = Vector3.new(startX + (i - 1), y, (layer % 2) * 0.5)
+            part.Anchored = true
+            part.CanCollide = false
+            part.Material = (num > 500000) and Enum.Material.Neon or Enum.Material.SmoothPlastic
+            part.Color = Color3.fromHSV((layer * 0.05 + i * 0.02) % 1, 0.6, 0.9)
+            part.Parent = worldModel
         end
     end
-    scan(Workspace)
-    scan(ReplicatedStorage)
-
-    for _, remote in ipairs(remotes) do
-        pcall(function()
-            if remote:IsA("RemoteFunction") then
-                remote:InvokeServer(targetPlayer.Name)
-            else
-                remote:FireServer(targetPlayer.Name)
-            end
-            task.wait(0.4)
-            success = true
-        end)
-    end
-    return success
+    local maxY = layers * 2.2
+    PV_Cam.CFrame = CFrame.new(0, maxY * 0.5, math.max(18, maxY * 1.2), 0, -0.3, -0.9, 0, 0.9, -0.3, 1, 0, 0)
 end
 
 SpawnWorkspaceBtn.MouseButton1Click:Connect(function()
@@ -561,26 +510,33 @@ SpawnWorkspaceBtn.MouseButton1Click:Connect(function()
     if not localChar or not localChar:FindFirstChild("HumanoidRootPart") then return end
     local root = localChar.HumanoidRootPart
 
-    tryForceLoadPlayerBuild(currentPreviewTargetPlayer)
-    task.wait(1.0)
-
-    local prev = Workspace:FindFirstChild("ForcePreview_" .. currentPreviewTargetPlayer.Name)
+    local prev = Workspace:FindFirstChild("PreviewSpawn_" .. currentPreviewTargetPlayer.Name)
     if prev then prev:Destroy() end
 
-    local blocksRoot = Workspace:FindFirstChild("Blocks")
-    local playerBuild = blocksRoot and blocksRoot:FindFirstChild(currentPreviewTargetPlayer.Name)
-    if playerBuild then
-        local newModel = Instance.new("Model")
-        newModel.Name = "ForcePreview_" .. currentPreviewTargetPlayer.Name
-        newModel.Parent = Workspace
-        for _, child in ipairs(playerBuild:GetChildren()) do
-            if child:IsA("Model") then
-                child:Clone().Parent = newModel
-            end
+    -- 我们只能生成合成预览，因为无法获取真实建筑
+    local model = Instance.new("Model")
+    model.Name = "PreviewSpawn_" .. currentPreviewTargetPlayer.Name
+    model.Parent = Workspace
+    local num = currentPreviewSlotValue
+    local layers = math.max(1, math.min(math.floor(num / 1500) + 1, 16))
+    local blocksPerLayer = math.max(1, math.min(math.floor(layers * 0.7) + 2, 8))
+    for layer = 1, layers do
+        local y = layer * 2.2 - 1.1
+        local countThisLayer = math.min(blocksPerLayer, layer * 2)
+        local startX = -(countThisLayer - 1) * 0.5
+        for i = 1, countThisLayer do
+            local p = Instance.new("Part")
+            p.Size = Vector3.new(1.8, 1.8, 1.8)
+            p.Position = Vector3.new(startX + (i - 1), y, (layer % 2) * 0.5)
+            p.Anchored = true
+            p.CanCollide = false
+            p.Material = (num > 500000) and Enum.Material.Neon or Enum.Material.SmoothPlastic
+            p.Color = Color3.fromHSV((layer * 0.05 + i * 0.02) % 1, 0.6, 0.9)
+            p.Parent = model
         end
-        local spawnPos = root.Position + root.CFrame.LookVector * 14 + Vector3.new(0, 6, 0)
-        newModel:PivotTo(CFrame.new(spawnPos))
     end
+    local spawnPos = root.Position + root.CFrame.LookVector * 14 + Vector3.new(0, 6, 0)
+    model:PivotTo(CFrame.new(spawnPos))
 end)
 
 -- ==================== 核心加载函数 ====================
@@ -663,7 +619,7 @@ local function loadPlayerDataDisplay(targetPlayer)
         table.insert(liveConnections, dataFolder.ChildAdded:Connect(function(newIt) renderItemRow(newIt) end))
 
     elseif currentMode == "OtherData" then
-        UserLabel.Text = targetPlayer.Name .. "'s Slots (REMOTE FORCE LOAD)"
+        UserLabel.Text = targetPlayer.Name .. "'s Slots"
         local otherData = targetPlayer:WaitForChild("OtherData", 5)
         if not otherData then return end
 
@@ -727,61 +683,9 @@ local function loadPlayerDataDisplay(targetPlayer)
                 currentPreviewSlotValue = tonumber(item.Value) or 0
                 currentPreviewSlotName = displayName
                 currentPreviewTargetPlayer = targetPlayer
-
-                PreviewTitle.Text = "Remote Force: " .. displayName
-                PreviewInfoLabel.Text = "Requesting remote data..."
-
-                tryForceLoadPlayerBuild(targetPlayer)
-                task.wait(1.2)
-
-                for _, c in ipairs(PV_World:GetChildren()) do c:Destroy() end
-
-                local localChar = Players.LocalPlayer.Character
-                local spawned = false
-
-                if localChar and localChar:FindFirstChild("HumanoidRootPart") then
-                    local root = localChar.HumanoidRootPart
-                    local prev = Workspace:FindFirstChild("ForcePreview_" .. targetPlayer.Name)
-                    if prev then prev:Destroy() end
-
-                    local blocksRoot = Workspace:FindFirstChild("Blocks")
-                    local playerBuild = blocksRoot and blocksRoot:FindFirstChild(targetPlayer.Name)
-
-                    if playerBuild and #playerBuild:GetChildren() > 0 then
-                        local newModel = Instance.new("Model")
-                        newModel.Name = "ForcePreview_" .. targetPlayer.Name
-                        newModel.Parent = Workspace
-                        local count = 0
-                        for _, child in ipairs(playerBuild:GetChildren()) do
-                            if child:IsA("Model") then
-                                child:Clone().Parent = newModel
-                                count = count + 1
-                                if count >= 300 then break end
-                            end
-                        end
-                        local spawnPos = root.Position + root.CFrame.LookVector * 14 + Vector3.new(0, 7, 0)
-                        newModel:PivotTo(CFrame.new(spawnPos))
-                        PreviewInfoLabel.Text = "SUCCESS: Real build force-spawned in front of you!"
-                        spawned = true
-                    end
-                end
-
-                if not spawned then
-                    PreviewInfoLabel.Text = "Remote request sent but build not yet visible. Showing value preview."
-                    local num = currentPreviewSlotValue
-                    local count = math.max(3, math.min(math.floor(num / 1000) + 5, 12))
-                    for i = 1, count do
-                        local p = Instance.new("Part")
-                        p.Size = Vector3.new(2.3, 2.3, 2.3)
-                        p.Position = Vector3.new(((i-1)%4)*2.6 - 4, math.floor((i-1)/4)*2.8, 0)
-                        p.Anchored = true
-                        p.Material = Enum.Material.Neon
-                        p.Color = Color3.fromHSV((i * 0.11) % 1, 0.85, 1)
-                        p.Parent = PV_World
-                    end
-                    PV_Cam.CFrame = CFrame.lookAt(Vector3.new(0, 5, 14), Vector3.new(0, 2, 0))
-                end
-
+                PreviewTitle.Text = "Preview: " .. displayName
+                PreviewInfoLabel.Text = "Value: " .. tostring(item.Value)
+                buildSyntheticPreview(currentPreviewSlotValue, PV_World)
                 PreviewFrame.Visible = true
             end)
 
@@ -903,4 +807,4 @@ for _, p in ipairs(Players:GetPlayers()) do addPlayerButton(p) end
 Players.PlayerAdded:Connect(addPlayerButton)
 Players.PlayerRemoving:Connect(removePlayerButton)
 
-print("[ULTIMATE VERSION] 已載入，嘗試多種遠端呼叫，失敗則顯示合成預覽。")
+print("[FINAL] 版本載入完成。預覽功能僅對當前伺服器內的玩家有效。")
