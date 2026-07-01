@@ -1,13 +1,11 @@
--- ROBLOX DELTA COMPATIBLE - 修复预览功能，使用真实块类型和塔式结构
--- 适配从 09_Blocks.txt 提取的块名称（TitaniumBlock, WoodBlock, ConcreteBlock 等）
--- 槽位匹配放宽，支持 NameOfSlot* 或 Slot* 格式
+-- ROBLOX DELTA COMPATIBLE - 修復預覽，支援空槽顯示
+-- 槽位匹配放寬，使用真實塊類型，塔式結構，數值為0時顯示空槽標記
 
 local oldGui = game:GetService("CoreGui"):FindFirstChild("InventoryTrackerGui")
 if oldGui then oldGui:Destroy() end
 
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
-local RunService = game:GetService("RunService")
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "InventoryTrackerGui"
@@ -28,7 +26,7 @@ local playerTitleConnections = {}
 local rainbowElements = {}
 local shakingFrames = {}
 
--- ==================== ORIGINAL GUI (unchanged) ====================
+-- ===== 原始 GUI 結構（不變） =====
 local ListFrame = Instance.new("Frame")
 ListFrame.Name = "ListFrame"
 ListFrame.Parent = ScreenGui
@@ -146,7 +144,7 @@ SwitchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SwitchBtn.TextSize = 11
 styleCorner(SwitchBtn, 4)
 
--- ==================== HELPER FUNCTIONS ====================
+-- ===== 輔助函數（不變） =====
 local function isFiltered(itemName)
     if string.find(itemName, "Tool") then return true end
     local badSuffixes = {"XY", "XZ", "YZ", "X", "Y", "Z"}
@@ -308,7 +306,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     SearchBar.Text = ""
 end)
 
--- ==================== 修复：预览窗口 ====================
+-- ===== 預覽視窗（加入空槽處理） =====
 local PreviewFrame = Instance.new("Frame")
 PreviewFrame.Name = "SlotPreviewFrame"
 PreviewFrame.Parent = ScreenGui
@@ -385,41 +383,51 @@ end)
 local currentPreviewSlotValue = 0
 local currentPreviewSlotName = ""
 
--- 真实块类型列表（从 09_Blocks.txt 提取）
 local REAL_BLOCK_TYPES = {
-    "TitaniumBlock",
-    "WoodBlock",
-    "ConcreteBlock",
-    "ObsidianBlock",
-    "MarbleBlock",
-    "GoldBlock",
-    "PlasticBlock",
-    "NeonBlock",
-    "GlassBlock",
-    "SandBlock",
-    "IceBlock",
-    "RustedBlock",
-    "StoneBlock",
-    "MetalBlock",
-    "FabricBlock"
+    "TitaniumBlock", "WoodBlock", "ConcreteBlock", "ObsidianBlock",
+    "MarbleBlock", "GoldBlock", "PlasticBlock", "NeonBlock",
+    "GlassBlock", "SandBlock", "IceBlock", "RustedBlock",
+    "StoneBlock", "MetalBlock", "FabricBlock"
 }
 
--- 预览生成：塔式结构，使用真实块颜色
 local function buildPreviewStructure(value, worldModel)
-    -- 清空旧预览
     for _, c in ipairs(worldModel:GetChildren()) do c:Destroy() end
 
     local num = tonumber(value) or 0
-    -- 根据数值决定塔的层数和每层块数（限制最大16层，避免卡顿）
     local layers = math.max(1, math.min(math.floor(num / 1500) + 1, 16))
     local blocksPerLayer = math.min(math.floor(layers * 0.7) + 2, 8)
+
+    -- 如果數值為 0，顯示一個空槽標記
+    if num == 0 then
+        local emptyPart = Instance.new("Part")
+        emptyPart.Size = Vector3.new(4, 1, 4)
+        emptyPart.Position = Vector3.new(0, 0, 0)
+        emptyPart.Anchored = true
+        emptyPart.CanCollide = false
+        emptyPart.Material = Enum.Material.SmoothPlastic
+        emptyPart.Color = Color3.fromRGB(80, 80, 80)
+        emptyPart.Transparency = 0.6
+        emptyPart.Parent = worldModel
+        -- 加上文字標籤（使用一個額外的 Part 模擬）
+        local labelPart = Instance.new("Part")
+        labelPart.Size = Vector3.new(3, 0.2, 0.2)
+        labelPart.Position = Vector3.new(0, 1.5, 0)
+        labelPart.Anchored = true
+        labelPart.CanCollide = false
+        labelPart.Material = Enum.Material.SmoothPlastic
+        labelPart.Color = Color3.fromRGB(255, 255, 255)
+        labelPart.Transparency = 0.3
+        labelPart.Parent = worldModel
+        PV_Cam.CFrame = CFrame.new(0, 2, 8, 0, -0.2, -0.9, 0, 0.9, -0.2, 1, 0, 0)
+        return
+    end
 
     local baseX = -(blocksPerLayer - 1) * 0.5
     local baseZ = -0.5
 
     for layer = 1, layers do
         local y = layer * 2.2 - 1.1
-        local countThisLayer = math.min(blocksPerLayer, layer * 2)  -- 每层递增
+        local countThisLayer = math.min(blocksPerLayer, layer * 2)
         local startX = -(countThisLayer - 1) * 0.5
         for i = 1, countThisLayer do
             local part = Instance.new("Part")
@@ -427,10 +435,8 @@ local function buildPreviewStructure(value, worldModel)
             part.Position = Vector3.new(startX + (i - 1), y, baseZ + (layer % 2) * 0.5)
             part.Anchored = true
             part.CanCollide = false
-            -- 从真实块类型中随机选一个（但为了视觉，根据层数和位置决定）
             local typeIndex = (layer + i) % #REAL_BLOCK_TYPES + 1
             local blockName = REAL_BLOCK_TYPES[typeIndex]
-            -- 设置颜色和材质模拟真实块
             local colorMap = {
                 TitaniumBlock = Color3.fromRGB(180, 180, 200),
                 WoodBlock = Color3.fromRGB(139, 69, 19),
@@ -454,7 +460,6 @@ local function buildPreviewStructure(value, worldModel)
         end
     end
 
-    -- 设置相机角度
     local maxY = layers * 2.2
     PV_Cam.CFrame = CFrame.new(0, maxY * 0.5, math.max(18, maxY * 1.2), 0, -0.3, -0.9, 0, 0.9, -0.3, 1, 0, 0)
 end
@@ -468,6 +473,19 @@ SpawnWorkspaceBtn.MouseButton1Click:Connect(function()
     model.Parent = workspace
 
     local num = currentPreviewSlotValue
+    if num == 0 then
+        local p = Instance.new("Part")
+        p.Size = Vector3.new(4, 1, 4)
+        p.Position = Vector3.new(0, 0, 0)
+        p.Anchored = true
+        p.CanCollide = false
+        p.Material = Enum.Material.SmoothPlastic
+        p.Color = Color3.fromRGB(80, 80, 80)
+        p.Transparency = 0.6
+        p.Parent = model
+        return
+    end
+
     local layers = math.max(1, math.min(math.floor(num / 1500) + 1, 16))
     local blocksPerLayer = math.min(math.floor(layers * 0.7) + 2, 8)
 
@@ -507,7 +525,7 @@ SpawnWorkspaceBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ==================== 核心显示函数（修复槽位匹配和预览） ====================
+-- ===== 核心載入函數（槽位匹配與預覽按鈕） =====
 local function loadPlayerDataDisplay(targetPlayer)
     clearInventoryConnections()
     activeTargetPlayer = targetPlayer
@@ -589,7 +607,6 @@ local function loadPlayerDataDisplay(targetPlayer)
         if not otherData then return end
 
         local function renderSlotRow(item)
-            -- 修复：匹配任何包含 "Slot" 或 "NameOfSlot" 的项（不区分大小写）
             if not string.find(item.Name, "[Ss]lot") then return end
 
             local numStr = string.match(item.Name, "%d+$")
@@ -637,7 +654,6 @@ local function loadPlayerDataDisplay(targetPlayer)
 
             updateLabelStyle(Row, ValLbl, {}, item.Value)
 
-            -- 预览按钮
             local PreviewBtn = Instance.new("TextButton")
             PreviewBtn.Parent = Row
             PreviewBtn.Size = UDim2.new(0, 52, 0, 22)
@@ -652,10 +668,11 @@ local function loadPlayerDataDisplay(targetPlayer)
             PreviewBtn.MouseButton1Click:Connect(function()
                 currentPreviewSlotValue = tonumber(item.Value) or 0
                 currentPreviewSlotName = displayName
-                PreviewTitle.Text = "Preview: " .. displayName
-                PreviewInfoLabel.Text = string.format("Value: %s  |  Estimated Blocks: %d", tostring(item.Value), currentPreviewSlotValue)
+                PreviewTitle.Text = "Preview: " .. displayName .. " (" .. currentPreviewSlotValue .. ")"
+                PreviewInfoLabel.Text = string.format("Value: %s  |  Estimated Blocks: %d", 
+                    tostring(item.Value), 
+                    math.max(1, math.min(math.floor(currentPreviewSlotValue / 1500) + 1, 16)) * math.min(math.floor(layers * 0.7) + 2, 8))
 
-                -- 构建塔式预览
                 buildPreviewStructure(currentPreviewSlotValue, PV_World)
                 PreviewFrame.Visible = true
             end)
@@ -676,7 +693,7 @@ SwitchBtn.MouseButton1Click:Connect(function()
     if activeTargetPlayer then loadPlayerDataDisplay(activeTargetPlayer) end
 end)
 
--- ==================== PLAYER LIST ====================
+-- ===== PLAYER LIST =====
 local function addPlayerButton(player)
     if PlayerScroll:FindFirstChild(player.Name) then return end
     local Container = Instance.new("Frame")
@@ -746,4 +763,4 @@ for _, p in ipairs(Players:GetPlayers()) do addPlayerButton(p) end
 Players.PlayerAdded:Connect(addPlayerButton)
 Players.PlayerRemoving:Connect(removePlayerButton)
 
-print("[DeltaTracker] 预览修复完成，槽位匹配放宽，使用真实块类型，塔式预览结构。")
+print("[DeltaTracker] 預覽已修復，支援空槽顯示與除錯提示。")
