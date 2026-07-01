@@ -390,14 +390,19 @@ local currentPreviewSlotName = ""
 local currentPreviewTargetPlayer = nil
 
 -- Helper: Try multiple known remotes to force load player build data
+-- Only attempts remote if the build folder is completely missing, to reduce side effects on other slots/saves.
 local function tryForceLoadPlayerBuild(targetPlayer)
+    local blocksRoot = workspace:FindFirstChild("Blocks")
+    if blocksRoot and blocksRoot:FindFirstChild(targetPlayer.Name) then
+        return false -- Already present, skip remote to avoid overwriting current slot state
+    end
+
     local success = false
     pcall(function()
-        -- Common block request remotes from game analysis
         local blockReq = workspace:FindFirstChild("BlockRequestsRemote")
         if blockReq and blockReq:IsA("RemoteFunction") then
-            blockReq:InvokeServer(targetPlayer.Name)  -- try requesting by name
-            task.wait(0.6)
+            blockReq:InvokeServer(targetPlayer.Name)
+            task.wait(0.8)
             success = true
         end
 
@@ -405,15 +410,14 @@ local function tryForceLoadPlayerBuild(targetPlayer)
             and ReplicatedStorage.InputLocalScript:FindFirstChild("QueueBlocksRequest")
         if queueReq and queueReq:IsA("RemoteEvent") then
             queueReq:FireServer(targetPlayer.UserId or targetPlayer.Name)
-            task.wait(0.6)
+            task.wait(0.7)
             success = true
         end
 
-        -- Additional common patterns
         local loadBoat = workspace:FindFirstChild("LoadBoatData")
         if loadBoat and loadBoat:IsA("RemoteEvent") then
             loadBoat:FireServer(targetPlayer.Name)
-            task.wait(0.4)
+            task.wait(0.5)
         end
     end)
     return success
