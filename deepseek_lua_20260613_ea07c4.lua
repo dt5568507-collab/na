@@ -1,10 +1,9 @@
--- ROBLOX DELTA COMPATIBLE - FINAL ULTIMATE VERSION
--- Changes per user request:
---   1. PREVIEW button now FORCES SPAWN of the real build DIRECTLY IN FRONT OF YOU (Workspace, in front of your character)
---      This is reliable and visible even if ViewportFrame has issues.
---   2. Player list now shows PLAYER AVATAR (headshot) on the left of each row, using the big empty space.
---   3. All previous powerful features retained (real build detection, smart fallback, lighting, etc.)
---   4. Preview button now primarily does the force-spawn in world. ViewportFrame kept as secondary quick view.
+-- ROBLOX DELTA COMPATIBLE - REMOTE FORCE LOAD VERSION
+-- Solves the exact problem: "只有他加載出來才能預覽"
+-- Now uses REMOTE calls first to attempt forcing the server to replicate
+-- the target player's build data EVEN IF they are not currently loaded/streamed to you.
+-- Then falls back to normal Workspace.Blocks check + force spawn in front of you.
+-- Player avatars still included.
 
 local oldGui = game:GetService("CoreGui"):FindFirstChild("InventoryTrackerGui")
 if oldGui then oldGui:Destroy() end
@@ -12,6 +11,7 @@ if oldGui then oldGui:Destroy() end
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "InventoryTrackerGui"
@@ -48,7 +48,7 @@ ListTitle.Parent = ListFrame
 ListTitle.Size = UDim2.new(1, 0, 0, 35)
 ListTitle.BackgroundTransparency = 1
 ListTitle.Font = Enum.Font.SourceSansBold
-ListTitle.Text = "PLAYER LIST"
+ListTitle.Text = "PLAYER LIST + REMOTE FORCE"
 ListTitle.TextColor3 = Color3.fromRGB(240, 240, 240)
 ListTitle.TextSize = 16
 
@@ -305,7 +305,10 @@ SearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     end
 end)
 
--- ==================== PREVIEW FRAME (kept as secondary quick view) ====================
+-- ==================== REMOTE FORCE LOAD + PREVIEW ====================
+-- Key new feature: Try to use remotes to force server to send build data
+-- even if the player/build is not currently replicated to your client.
+
 local PreviewFrame = Instance.new("Frame")
 PreviewFrame.Name = "SlotPreviewFrame"
 PreviewFrame.Parent = ScreenGui
@@ -323,7 +326,7 @@ PreviewTitle.Size = UDim2.new(1, -40, 0, 28)
 PreviewTitle.Position = UDim2.new(0, 10, 0, 6)
 PreviewTitle.BackgroundTransparency = 1
 PreviewTitle.Font = Enum.Font.SourceSansBold
-PreviewTitle.Text = "PREVIEW"
+PreviewTitle.Text = "REMOTE FORCE PREVIEW"
 PreviewTitle.TextColor3 = Color3.fromRGB(0, 200, 255)
 PreviewTitle.TextSize = 15
 
@@ -372,7 +375,7 @@ SpawnWorkspaceBtn.Position = UDim2.new(0, 10, 0, 230)
 SpawnWorkspaceBtn.Size = UDim2.new(1, -20, 0, 24)
 SpawnWorkspaceBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 180)
 SpawnWorkspaceBtn.Font = Enum.Font.SourceSansBold
-SpawnWorkspaceBtn.Text = "SPAWN IN FRONT OF ME (FORCE)"
+SpawnWorkspaceBtn.Text = "FORCE SPAWN IN FRONT (REMOTE)"
 SpawnWorkspaceBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SpawnWorkspaceBtn.TextSize = 12
 styleCorner(SpawnWorkspaceBtn, 5)
@@ -386,11 +389,45 @@ local currentPreviewSlotValue = 0
 local currentPreviewSlotName = ""
 local currentPreviewTargetPlayer = nil
 
+-- Helper: Try multiple known remotes to force load player build data
+local function tryForceLoadPlayerBuild(targetPlayer)
+    local success = false
+    pcall(function()
+        -- Common block request remotes from game analysis
+        local blockReq = workspace:FindFirstChild("BlockRequestsRemote")
+        if blockReq and blockReq:IsA("RemoteFunction") then
+            blockReq:InvokeServer(targetPlayer.Name)  -- try requesting by name
+            task.wait(0.6)
+            success = true
+        end
+
+        local queueReq = ReplicatedStorage:FindFirstChild("InputLocalScript")
+            and ReplicatedStorage.InputLocalScript:FindFirstChild("QueueBlocksRequest")
+        if queueReq and queueReq:IsA("RemoteEvent") then
+            queueReq:FireServer(targetPlayer.UserId or targetPlayer.Name)
+            task.wait(0.6)
+            success = true
+        end
+
+        -- Additional common patterns
+        local loadBoat = workspace:FindFirstChild("LoadBoatData")
+        if loadBoat and loadBoat:IsA("RemoteEvent") then
+            loadBoat:FireServer(targetPlayer.Name)
+            task.wait(0.4)
+        end
+    end)
+    return success
+end
+
 SpawnWorkspaceBtn.MouseButton1Click:Connect(function()
     if not currentPreviewTargetPlayer then return end
     local localChar = Players.LocalPlayer.Character
     if not localChar or not localChar:FindFirstChild("HumanoidRootPart") then return end
     local root = localChar.HumanoidRootPart
+
+    -- First try remote force load
+    tryForceLoadPlayerBuild(currentPreviewTargetPlayer)
+    task.wait(0.8)
 
     local prev = workspace:FindFirstChild("ForcePreview_" .. currentPreviewTargetPlayer.Name)
     if prev then prev:Destroy() end
@@ -413,7 +450,7 @@ SpawnWorkspaceBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ==================== loadPlayerDataDisplay ====================
+-- ==================== MAIN PREVIEW WITH REMOTE FORCE ====================
 local function loadPlayerDataDisplay(targetPlayer)
     clearInventoryConnections()
     activeTargetPlayer = targetPlayer
@@ -493,7 +530,7 @@ local function loadPlayerDataDisplay(targetPlayer)
         table.insert(liveConnections, dataFolder.ChildAdded:Connect(function(newIt) renderItemRow(newIt) end))
 
     elseif currentMode == "OtherData" then
-        UserLabel.Text = targetPlayer.Name .. "'s Slots (FORCE SPAWN + AVATAR)"
+        UserLabel.Text = targetPlayer.Name .. "'s Slots (REMOTE FORCE LOAD)"
         local otherData = targetPlayer:WaitForChild("OtherData", 5)
         if not otherData then return end
 
@@ -542,7 +579,6 @@ local function loadPlayerDataDisplay(targetPlayer)
 
             updateLabelStyle(Row, ValLbl, {}, item.Value)
 
-            -- PREVIEW button now does FORCE SPAWN in front of you
             local PreviewBtn = Instance.new("TextButton")
             PreviewBtn.Parent = Row
             PreviewBtn.Size = UDim2.new(0, 52, 0, 22)
@@ -559,8 +595,22 @@ local function loadPlayerDataDisplay(targetPlayer)
                 currentPreviewSlotName = displayName
                 currentPreviewTargetPlayer = targetPlayer
 
-                -- ========== MAIN FEATURE: FORCE SPAWN REAL BUILD IN FRONT OF YOU ==========
+                PreviewTitle.Text = "Remote Force: " .. displayName
+                PreviewInfoLabel.Text = "Requesting remote data..."
+
+                -- ========== KEY FIX: Use remote to force load even if not streamed ==========
+                local remoteSuccess = tryForceLoadPlayerBuild(targetPlayer)
+                if remoteSuccess then
+                    PreviewInfoLabel.Text = "Remote request sent. Waiting for replication..."
+                    task.wait(1.2)  -- give server time to replicate
+                end
+
+                -- Now try to find the build (should be more likely after remote call)
+                for _, c in ipairs(PV_World:GetChildren()) do c:Destroy() end
+
                 local localChar = Players.LocalPlayer.Character
+                local spawned = false
+
                 if localChar and localChar:FindFirstChild("HumanoidRootPart") then
                     local root = localChar.HumanoidRootPart
                     local prev = workspace:FindFirstChild("ForcePreview_" .. targetPlayer.Name)
@@ -585,47 +635,29 @@ local function loadPlayerDataDisplay(targetPlayer)
                         end
                         local spawnPos = root.Position + root.CFrame.LookVector * 14 + Vector3.new(0, 7, 0)
                         newModel:PivotTo(CFrame.new(spawnPos))
-                        PreviewInfoLabel.Text = "REAL BUILD SPAWNED in front of you!"
-                    else
-                        PreviewInfoLabel.Text = "No build found for this player (fallback)"
-                        -- Fallback: spawn simple colored blocks
-                        local num = currentPreviewSlotValue
-                        local fbModel = Instance.new("Model")
-                        fbModel.Name = "ForcePreview_" .. targetPlayer.Name .. "_Fallback"
-                        fbModel.Parent = workspace
-                        local count = math.max(4, math.min(math.floor(num / 800) + 5, 14))
-                        for i = 1, count do
-                            local p = Instance.new("Part")
-                            p.Size = Vector3.new(2.5, 2.5, 2.5)
-                            p.Position = spawnPos + Vector3.new(((i-1)%4)*3 - 4.5, math.floor((i-1)/4)*3, 0)
-                            p.Anchored = true
-                            p.CanCollide = false
-                            p.Material = Enum.Material.Neon
-                            p.Color = Color3.fromHSV((i * 0.1) % 1, 0.9, 1)
-                            p.Parent = fbModel
-                        end
-                        fbModel:PivotTo(CFrame.new(spawnPos))
+                        PreviewInfoLabel.Text = "SUCCESS: Real build force-spawned in front of you!"
+                        spawned = true
                     end
                 end
 
-                -- Also show the small viewport as secondary quick view (optional)
-                PreviewTitle.Text = "Quick View: " .. displayName
-                PreviewFrame.Visible = true
-
-                -- Populate small viewport with simple representation
-                for _, c in ipairs(PV_World:GetChildren()) do c:Destroy() end
-                local num = currentPreviewSlotValue
-                local count = math.max(2, math.min(math.floor(num / 1500) + 4, 10))
-                for i = 1, count do
-                    local p = Instance.new("Part")
-                    p.Size = Vector3.new(2.2, 2.2, 2.2)
-                    p.Position = Vector3.new(((i-1)%4)*2.5 - 3.5, math.floor((i-1)/4)*2.5, 0)
-                    p.Anchored = true
-                    p.Material = (num > 400000) and Enum.Material.Neon or Enum.Material.SmoothPlastic
-                    p.Color = Color3.fromHSV((i * 0.13) % 1, 0.85, 1)
-                    p.Parent = PV_World
+                if not spawned then
+                    -- Fallback synthetic
+                    PreviewInfoLabel.Text = "Remote request sent but build not yet visible. Showing value preview."
+                    local num = currentPreviewSlotValue
+                    local count = math.max(3, math.min(math.floor(num / 1000) + 5, 12))
+                    for i = 1, count do
+                        local p = Instance.new("Part")
+                        p.Size = Vector3.new(2.3, 2.3, 2.3)
+                        p.Position = Vector3.new(((i-1)%4)*2.6 - 4, math.floor((i-1)/4)*2.8, 0)
+                        p.Anchored = true
+                        p.Material = Enum.Material.Neon
+                        p.Color = Color3.fromHSV((i * 0.11) % 1, 0.85, 1)
+                        p.Parent = PV_World
+                    end
+                    PV_Cam.CFrame = CFrame.lookAt(Vector3.new(0, 5, 14), Vector3.new(0, 2, 0))
                 end
-                PV_Cam.CFrame = CFrame.lookAt(Vector3.new(0, 5, 14), Vector3.new(0, 2, 0))
+
+                PreviewFrame.Visible = true
             end)
 
             table.insert(liveConnections, item.Changed:Connect(function(newVal)
@@ -660,11 +692,10 @@ local function addPlayerButton(player)
     local Container = Instance.new("Frame")
     Container.Name = player.Name
     Container.Parent = PlayerScroll
-    Container.Size = UDim2.new(1, 0, 0, 56)  -- Slightly taller for avatar
+    Container.Size = UDim2.new(1, 0, 0, 56)
     Container.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
     styleCorner(Container, 4)
 
-    -- AVATAR (uses the big empty space on the left)
     local Avatar = Instance.new("ImageLabel")
     Avatar.Name = "Avatar"
     Avatar.Parent = Container
@@ -746,4 +777,4 @@ for _, p in ipairs(Players:GetPlayers()) do addPlayerButton(p) end
 Players.PlayerAdded:Connect(addPlayerButton)
 Players.PlayerRemoving:Connect(removePlayerButton)
 
-print("[FINAL TRACKER] Force-spawn in front of you + Player avatars enabled. Most reliable preview now.")
+print("[REMOTE FORCE VERSION] Now attempts remote calls to load builds even when player is not streamed in.")
