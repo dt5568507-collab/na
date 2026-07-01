@@ -45,18 +45,39 @@ styleCorner(ListFrame, 8)
 
 local ListTitle = Instance.new("TextLabel")
 ListTitle.Parent = ListFrame
-ListTitle.Size = UDim2.new(1, 0, 0, 35)
+ListTitle.Size = UDim2.new(1, 0, 0, 28)
 ListTitle.BackgroundTransparency = 1
 ListTitle.Font = Enum.Font.SourceSansBold
 ListTitle.Text = "PLAYER LIST + REMOTE FORCE"
 ListTitle.TextColor3 = Color3.fromRGB(240, 240, 240)
-ListTitle.TextSize = 16
+ListTitle.TextSize = 15
+
+-- Search bar for player list (new feature)
+local PlayerSearchBar = Instance.new("TextBox")
+PlayerSearchBar.Name = "PlayerSearchBar"
+PlayerSearchBar.Parent = ListFrame
+PlayerSearchBar.Size = UDim2.new(1, -10, 0, 24)
+PlayerSearchBar.Position = UDim2.new(0, 5, 0, 30)
+PlayerSearchBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+PlayerSearchBar.BorderSizePixel = 0
+PlayerSearchBar.Font = Enum.Font.SourceSans
+PlayerSearchBar.PlaceholderText = "Search player name (or type name + Enter to force preview)..."
+PlayerSearchBar.Text = ""
+PlayerSearchBar.TextColor3 = Color3.fromRGB(255, 255, 255)
+PlayerSearchBar.PlaceholderColor3 = Color3.fromRGB(120, 120, 120)
+PlayerSearchBar.TextSize = 13
+PlayerSearchBar.TextXAlignment = Enum.TextXAlignment.Left
+styleCorner(PlayerSearchBar, 4)
+
+local PlayerSearchPadding = Instance.new("UIPadding")
+PlayerSearchPadding.PaddingLeft = UDim.new(0, 8)
+PlayerSearchPadding.Parent = PlayerSearchBar
 
 local PlayerScroll = Instance.new("ScrollingFrame")
 PlayerScroll.Parent = ListFrame
 PlayerScroll.BackgroundTransparency = 1
-PlayerScroll.Position = UDim2.new(0, 5, 0, 40)
-PlayerScroll.Size = UDim2.new(1, -10, 1, -45)
+PlayerScroll.Position = UDim2.new(0, 5, 0, 58)
+PlayerScroll.Size = UDim2.new(1, -10, 1, -63)
 PlayerScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 PlayerScroll.ScrollBarThickness = 4
 
@@ -67,6 +88,75 @@ PlayerLayout.Padding = UDim.new(0, 5)
 
 PlayerLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     PlayerScroll.CanvasSize = UDim2.new(0, 0, 0, PlayerLayout.AbsoluteContentSize.Y)
+end)
+
+-- Player list search + force preview by name
+PlayerSearchBar:GetPropertyChangedSignal("Text"):Connect(function()
+    local txt = string.lower(PlayerSearchBar.Text)
+    for _, child in ipairs(PlayerScroll:GetChildren()) do
+        if child:IsA("Frame") and child.Name ~= "UIListLayout" then
+            local nameLbl = child:FindFirstChild("NameLbl") or child:FindFirstChildOfClass("TextLabel")
+            if nameLbl then
+                child.Visible = (txt == "" or string.find(string.lower(nameLbl.Text), txt))
+            end
+        end
+    end
+end)
+
+PlayerSearchBar.FocusLost:Connect(function(enterPressed)
+    if enterPressed and PlayerSearchBar.Text ~= "" then
+        local searchName = PlayerSearchBar.Text
+        -- Try to find existing player
+        local target = Players:FindFirstChild(searchName)
+        if target then
+            loadPlayerDataDisplay(target)
+        else
+            -- Force remote attempt even if player not currently in server list
+            PreviewTitle.Text = "Force Remote: " .. searchName
+            PreviewInfoLabel.Text = "Attempting remote query for " .. searchName .. "..."
+            PreviewFrame.Visible = true
+
+            -- Try remote
+            pcall(function()
+                local blockReq = workspace:FindFirstChild("BlockRequestsRemote")
+                if blockReq and blockReq:IsA("RemoteFunction") then
+                    blockReq:InvokeServer(searchName)
+                end
+                local queueReq = ReplicatedStorage:FindFirstChild("InputLocalScript")
+                    and ReplicatedStorage.InputLocalScript:FindFirstChild("QueueBlocksRequest")
+                if queueReq and queueReq:IsA("RemoteEvent") then
+                    queueReq:FireServer(searchName)
+                end
+            end)
+
+            task.wait(1.5)
+
+            -- Try to spawn if now available
+            local blocksRoot = workspace:FindFirstChild("Blocks")
+            local playerBuild = blocksRoot and blocksRoot:FindFirstChild(searchName)
+            local localChar = Players.LocalPlayer.Character
+            if playerBuild and localChar and localChar:FindFirstChild("HumanoidRootPart") then
+                local root = localChar.HumanoidRootPart
+                local prev = workspace:FindFirstChild("ForcePreview_" .. searchName)
+                if prev then prev:Destroy() end
+
+                local newModel = Instance.new("Model")
+                newModel.Name = "ForcePreview_" .. searchName
+                newModel.Parent = workspace
+                for _, child in ipairs(playerBuild:GetChildren()) do
+                    if child:IsA("Model") then
+                        child:Clone().Parent = newModel
+                    end
+                end
+                local spawnPos = root.Position + root.CFrame.LookVector * 14 + Vector3.new(0, 7, 0)
+                newModel:PivotTo(CFrame.new(spawnPos))
+                PreviewInfoLabel.Text = "Force spawned from remote query!"
+            else
+                PreviewInfoLabel.Text = "Remote query sent. Build may not be available or player not in this server."
+            end
+        end
+        PlayerSearchBar.Text = ""
+    end
 end)
 
 local DetailFrame = Instance.new("Frame")
