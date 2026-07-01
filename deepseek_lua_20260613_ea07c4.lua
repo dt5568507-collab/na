@@ -1,5 +1,5 @@
--- ROBLOX DELTA COMPATIBLE - REMOTE FORCE LOAD + SEARCH + SYNTHETIC FALLBACK
--- 現在搜尋框可輸入任意玩家名稱，嘗試遠端載入，失敗則顯示合成預覽
+-- ROBLOX DELTA - ULTIMATE REMOTE FORCE LOAD + SEARCH + SYNTHETIC PREVIEW
+-- 尝试多种远程调用以获取不在当前服务器的玩家数据，失败则显示合成预览
 
 local oldGui = game:GetService("CoreGui"):FindFirstChild("InventoryTrackerGui")
 if oldGui then oldGui:Destroy() end
@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "InventoryTrackerGui"
@@ -24,7 +25,6 @@ local currentMode = "Data"
 local activeTargetPlayer = nil
 local liveConnections = {}
 local playerTitleConnections = {}
-
 local rainbowElements = {}
 local shakingFrames = {}
 
@@ -48,7 +48,6 @@ ListTitle.Text = "PLAYER LIST + SEARCH"
 ListTitle.TextColor3 = Color3.fromRGB(240, 240, 240)
 ListTitle.TextSize = 15
 
--- 搜尋框 (可輸入任意玩家名稱，按 Enter 嘗試載入)
 local PlayerSearchBar = Instance.new("TextBox")
 PlayerSearchBar.Name = "PlayerSearchBar"
 PlayerSearchBar.Parent = ListFrame
@@ -57,7 +56,7 @@ PlayerSearchBar.Position = UDim2.new(0, 5, 0, 30)
 PlayerSearchBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 PlayerSearchBar.BorderSizePixel = 0
 PlayerSearchBar.Font = Enum.Font.SourceSans
-PlayerSearchBar.PlaceholderText = "Enter player name (any, try remote)..."
+PlayerSearchBar.PlaceholderText = "Enter ANY player name (remote attempt)..."
 PlayerSearchBar.Text = ""
 PlayerSearchBar.TextColor3 = Color3.fromRGB(255, 255, 255)
 PlayerSearchBar.PlaceholderColor3 = Color3.fromRGB(120, 120, 120)
@@ -86,7 +85,7 @@ PlayerLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     PlayerScroll.CanvasSize = UDim2.new(0, 0, 0, PlayerLayout.AbsoluteContentSize.Y)
 end)
 
--- 搜尋框過濾現有玩家
+-- 搜索框过滤现有玩家
 PlayerSearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     local txt = string.lower(PlayerSearchBar.Text)
     for _, child in ipairs(PlayerScroll:GetChildren()) do
@@ -99,13 +98,13 @@ PlayerSearchBar:GetPropertyChangedSignal("Text"):Connect(function()
     end
 end)
 
--- 按 Enter 觸發載入（可嘗試遠端）
+-- 按 Enter 触发远程加载
 PlayerSearchBar.FocusLost:Connect(function(enterPressed)
     if not enterPressed then return end
     local searchName = PlayerSearchBar.Text
     if searchName == "" then return end
 
-    -- 先檢查當前伺服器是否已有該玩家
+    -- 先检查当前服务器是否已有该玩家
     local target = Players:FindFirstChild(searchName)
     if target then
         loadPlayerDataDisplay(target)
@@ -113,49 +112,53 @@ PlayerSearchBar.FocusLost:Connect(function(enterPressed)
         return
     end
 
-    -- 不在伺服器，嘗試遠端強制載入
+    -- 不在服务器，尝试所有可能的远程方法
     PreviewTitle.Text = "Remote Query: " .. searchName
     PreviewInfoLabel.Text = "Attempting remote load for " .. searchName .. "..."
     PreviewFrame.Visible = true
 
+    -- 收集所有可能用于加载玩家数据的远程对象（通过名称匹配）
+    local remotes = {}
+    local function scan(container)
+        for _, child in ipairs(container:GetChildren()) do
+            if child:IsA("RemoteFunction") or child:IsA("RemoteEvent") then
+                local name = string.lower(child.Name)
+                if string.find(name, "block") or string.find(name, "load") or string.find(name, "boat") or string.find(name, "data") or string.find(name, "request") then
+                    table.insert(remotes, child)
+                end
+            end
+        end
+    end
+    scan(Workspace)
+    scan(ReplicatedStorage)
+
     local success = false
-    pcall(function()
-        local blockReq = workspace:FindFirstChild("BlockRequestsRemote")
-        if blockReq and blockReq:IsA("RemoteFunction") then
-            blockReq:InvokeServer(searchName)
-            task.wait(1.2)
+    for _, remote in ipairs(remotes) do
+        pcall(function()
+            if remote:IsA("RemoteFunction") then
+                remote:InvokeServer(searchName)
+            else
+                remote:FireServer(searchName)
+            end
+            task.wait(0.5)
             success = true
-        end
+        end)
+    end
 
-        local queueReq = ReplicatedStorage:FindFirstChild("InputLocalScript")
-            and ReplicatedStorage.InputLocalScript:FindFirstChild("QueueBlocksRequest")
-        if queueReq and queueReq:IsA("RemoteEvent") then
-            queueReq:FireServer(searchName)
-            task.wait(1.0)
-            success = true
-        end
-
-        local loadBoat = workspace:FindFirstChild("LoadBoatData")
-        if loadBoat and loadBoat:IsA("RemoteEvent") then
-            loadBoat:FireServer(searchName)
-            task.wait(0.8)
-        end
-    end)
-
-    -- 稍等片刻，看是否出現建築
-    task.wait(1.0)
-    local blocksRoot = workspace:FindFirstChild("Blocks")
+    -- 等待可能出现的建筑
+    task.wait(1.2)
+    local blocksRoot = Workspace:FindFirstChild("Blocks")
     local playerBuild = blocksRoot and blocksRoot:FindFirstChild(searchName)
     if playerBuild and #playerBuild:GetChildren() > 0 then
-        -- 找到建築，強制在前方生成
+        -- 找到建筑，强制在前方生成
         local localChar = Players.LocalPlayer.Character
         if localChar and localChar:FindFirstChild("HumanoidRootPart") then
             local root = localChar.HumanoidRootPart
-            local prev = workspace:FindFirstChild("ForcePreview_" .. searchName)
+            local prev = Workspace:FindFirstChild("ForcePreview_" .. searchName)
             if prev then prev:Destroy() end
             local newModel = Instance.new("Model")
             newModel.Name = "ForcePreview_" .. searchName
-            newModel.Parent = workspace
+            newModel.Parent = Workspace
             for _, child in ipairs(playerBuild:GetChildren()) do
                 if child:IsA("Model") then
                     child:Clone().Parent = newModel
@@ -166,10 +169,9 @@ PlayerSearchBar.FocusLost:Connect(function(enterPressed)
             PreviewInfoLabel.Text = "SUCCESS: Real build spawned from remote query!"
         end
     else
-        -- 若無建築，顯示合成預覽（基於數值，如果有的話）
-        -- 但我們沒有該玩家的數值，所以只能顯示「未找到資料」
+        -- 若没有建筑，显示合成预览（基于数值，如果有的话）
+        -- 但我们没有该玩家的数值，所以只能显示“未找到数据”
         PreviewInfoLabel.Text = "Remote query finished, but no build data found. (Player may not be in this server or no permission.)"
-        -- 在視口顯示一個提示方塊
         for _, c in ipairs(PV_World:GetChildren()) do c:Destroy() end
         local msgPart = Instance.new("Part")
         msgPart.Size = Vector3.new(4, 1, 4)
@@ -194,7 +196,11 @@ PlayerSearchBar.FocusLost:Connect(function(enterPressed)
     PlayerSearchBar.Text = ""
 end)
 
--- Detail Frame
+-- 其余UI（DetailFrame, PreviewFrame, helpers等）与之前相同，此处省略重复，但实际脚本必须包含全部。
+-- 由于字符限制，我在下面提供完整脚本的下载链接？不，必须直接贴出。
+-- 我会继续粘贴完整内容，确保没有省略。
+
+-- ==================== DETAIL FRAME ====================
 local DetailFrame = Instance.new("Frame")
 DetailFrame.Name = "DetailFrame"
 DetailFrame.Parent = ScreenGui
@@ -512,36 +518,40 @@ local currentPreviewSlotValue = 0
 local currentPreviewSlotName = ""
 local currentPreviewTargetPlayer = nil
 
--- 遠端強制載入函數
+-- 远程强制加载函数（增强版）
 local function tryForceLoadPlayerBuild(targetPlayer)
-    local blocksRoot = workspace:FindFirstChild("Blocks")
+    local blocksRoot = Workspace:FindFirstChild("Blocks")
     if blocksRoot and blocksRoot:FindFirstChild(targetPlayer.Name) then
-        return false -- Already present, skip remote to avoid overwriting current slot state
+        return false
     end
 
     local success = false
-    pcall(function()
-        local blockReq = workspace:FindFirstChild("BlockRequestsRemote")
-        if blockReq and blockReq:IsA("RemoteFunction") then
-            blockReq:InvokeServer(targetPlayer.Name)
-            task.wait(0.8)
-            success = true
+    -- 尝试所有可能的 RemoteFunction/RemoteEvent
+    local remotes = {}
+    local function scan(container)
+        for _, child in ipairs(container:GetChildren()) do
+            if child:IsA("RemoteFunction") or child:IsA("RemoteEvent") then
+                local name = string.lower(child.Name)
+                if string.find(name, "block") or string.find(name, "load") or string.find(name, "boat") or string.find(name, "data") or string.find(name, "request") then
+                    table.insert(remotes, child)
+                end
+            end
         end
+    end
+    scan(Workspace)
+    scan(ReplicatedStorage)
 
-        local queueReq = ReplicatedStorage:FindFirstChild("InputLocalScript")
-            and ReplicatedStorage.InputLocalScript:FindFirstChild("QueueBlocksRequest")
-        if queueReq and queueReq:IsA("RemoteEvent") then
-            queueReq:FireServer(targetPlayer.UserId or targetPlayer.Name)
-            task.wait(0.7)
+    for _, remote in ipairs(remotes) do
+        pcall(function()
+            if remote:IsA("RemoteFunction") then
+                remote:InvokeServer(targetPlayer.Name)
+            else
+                remote:FireServer(targetPlayer.Name)
+            end
+            task.wait(0.4)
             success = true
-        end
-
-        local loadBoat = workspace:FindFirstChild("LoadBoatData")
-        if loadBoat and loadBoat:IsA("RemoteEvent") then
-            loadBoat:FireServer(targetPlayer.Name)
-            task.wait(0.5)
-        end
-    end)
+        end)
+    end
     return success
 end
 
@@ -551,24 +561,21 @@ SpawnWorkspaceBtn.MouseButton1Click:Connect(function()
     if not localChar or not localChar:FindFirstChild("HumanoidRootPart") then return end
     local root = localChar.HumanoidRootPart
 
-    -- 先嘗試遠端強制載入
     tryForceLoadPlayerBuild(currentPreviewTargetPlayer)
-    task.wait(0.8)
+    task.wait(1.0)
 
-    local prev = workspace:FindFirstChild("ForcePreview_" .. currentPreviewTargetPlayer.Name)
+    local prev = Workspace:FindFirstChild("ForcePreview_" .. currentPreviewTargetPlayer.Name)
     if prev then prev:Destroy() end
 
-    local blocksRoot = workspace:FindFirstChild("Blocks")
+    local blocksRoot = Workspace:FindFirstChild("Blocks")
     local playerBuild = blocksRoot and blocksRoot:FindFirstChild(currentPreviewTargetPlayer.Name)
     if playerBuild then
         local newModel = Instance.new("Model")
         newModel.Name = "ForcePreview_" .. currentPreviewTargetPlayer.Name
-        newModel.Parent = workspace
-
+        newModel.Parent = Workspace
         for _, child in ipairs(playerBuild:GetChildren()) do
             if child:IsA("Model") then
-                local cl = child:Clone()
-                cl.Parent = newModel
+                child:Clone().Parent = newModel
             end
         end
         local spawnPos = root.Position + root.CFrame.LookVector * 14 + Vector3.new(0, 6, 0)
@@ -576,7 +583,7 @@ SpawnWorkspaceBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ==================== 核心載入函數 ====================
+-- ==================== 核心加载函数 ====================
 local function loadPlayerDataDisplay(targetPlayer)
     clearInventoryConnections()
     activeTargetPlayer = targetPlayer
@@ -724,12 +731,8 @@ local function loadPlayerDataDisplay(targetPlayer)
                 PreviewTitle.Text = "Remote Force: " .. displayName
                 PreviewInfoLabel.Text = "Requesting remote data..."
 
-                -- 嘗試遠端載入
-                local remoteSuccess = tryForceLoadPlayerBuild(targetPlayer)
-                if remoteSuccess then
-                    PreviewInfoLabel.Text = "Remote request sent. Waiting for replication..."
-                    task.wait(1.2)
-                end
+                tryForceLoadPlayerBuild(targetPlayer)
+                task.wait(1.2)
 
                 for _, c in ipairs(PV_World:GetChildren()) do c:Destroy() end
 
@@ -738,23 +741,21 @@ local function loadPlayerDataDisplay(targetPlayer)
 
                 if localChar and localChar:FindFirstChild("HumanoidRootPart") then
                     local root = localChar.HumanoidRootPart
-                    local prev = workspace:FindFirstChild("ForcePreview_" .. targetPlayer.Name)
+                    local prev = Workspace:FindFirstChild("ForcePreview_" .. targetPlayer.Name)
                     if prev then prev:Destroy() end
 
-                    local blocksRoot = workspace:FindFirstChild("Blocks")
+                    local blocksRoot = Workspace:FindFirstChild("Blocks")
                     local playerBuild = blocksRoot and blocksRoot:FindFirstChild(targetPlayer.Name)
 
                     if playerBuild and #playerBuild:GetChildren() > 0 then
                         local newModel = Instance.new("Model")
                         newModel.Name = "ForcePreview_" .. targetPlayer.Name
-                        newModel.Parent = workspace
-
+                        newModel.Parent = Workspace
                         local count = 0
                         for _, child in ipairs(playerBuild:GetChildren()) do
                             if child:IsA("Model") then
-                                local cl = child:Clone()
-                                cl.Parent = newModel
-                                count += 1
+                                child:Clone().Parent = newModel
+                                count = count + 1
                                 if count >= 300 then break end
                             end
                         end
@@ -766,7 +767,6 @@ local function loadPlayerDataDisplay(targetPlayer)
                 end
 
                 if not spawned then
-                    -- 合成預覽（基於數值）
                     PreviewInfoLabel.Text = "Remote request sent but build not yet visible. Showing value preview."
                     local num = currentPreviewSlotValue
                     local count = math.max(3, math.min(math.floor(num / 1000) + 5, 12))
@@ -903,4 +903,4 @@ for _, p in ipairs(Players:GetPlayers()) do addPlayerButton(p) end
 Players.PlayerAdded:Connect(addPlayerButton)
 Players.PlayerRemoving:Connect(removePlayerButton)
 
-print("[REMOTE FORCE + SEARCH VERSION] 搜尋框可輸入任意名稱，嘗試遠端載入或顯示合成預覽。")
+print("[ULTIMATE VERSION] 已載入，嘗試多種遠端呼叫，失敗則顯示合成預覽。")
